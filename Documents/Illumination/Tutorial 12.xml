@@ -132,17 +132,19 @@ struct MaterialBlock
             <para>When you use <function>glBindBufferRange</function> to bind a UBO, OpenGL requires
                 that the offset parameter, the parameter that tells where the beginning of the
                 uniform block's data is within the buffer object, be aligned to a specific value.
-                What value, you may ask?</para>
-            <para>Welcome to the world of implementation-dependent values. This means that it can
-                (and most certainly will) change depending on what platform you're running on. This
-                code was tested on two different hardware platforms; one has a minimum alignment of
-                64, the other an alignment of 256.</para>
+                That is, the begining of a uniform block within a uniform buffer must be a multiple
+                of a specific value. 0 works, of course, but since we have more than one block
+                within a uniform buffer, they can't all start at the buffer's beginning.</para>
+            <para>What is this value, you may ask? Welcome to the world of implementation-dependent
+                values. This means that it can (and most certainly will) change depending on what
+                platform you're running on. This code was tested on two different hardware
+                platforms; one has a minimum alignment of 64, the other an alignment of 256.</para>
             <para>To retrieve the implementation-dependent value, we must use a previously-unseen
                 function: <function>glGetIntegerv</function>. This is a function that does one
                 simple thing: gets integer values from OpenGL. However, the meaning of the value
                 retrieved depends on the enumerator passed as the first parameter. Basically, it's a
                 way to have state retrieval functions that can easily be extended by adding new
-                enumerators rather than new function entrypoints.</para>
+                enumerators rather than new functions.</para>
             <para>The code that builds the material uniform buffer is as follows:</para>
             <example>
                 <title>Material UBO Construction</title>
@@ -367,7 +369,7 @@ else
         <?dbhtml filename="Tut12 High Dynamic Range.html" ?>
         <title>High Dynamic Range</title>
         <para>In order to answer this question, we must first determine why flashlights appear
-            brighter at night than in the daytime? Much of the answer has to do with our
+            brighter at night than in the daytime. Much of the answer has to do with our
             eyes.</para>
         <para>The pupil is the hole in our eyes that allows light to pass through it; cameras call
             this hole the aperture. The hole is small, relative to the world, which helps with
@@ -614,7 +616,7 @@ else
             we multiplied the sun and ambient intensities by 3 in the last section, we were
             increasing the brightness by 3x. Multiplying the maximum intensity by 3 had the effect
             of reducing the overall brightness by 3x.</para>
-        <para>There's just one problem: tour screen doesn't work that way. Time for a short history
+        <para>There's just one problem: your screen doesn't work that way. Time for a short history
             of television/monitors.</para>
         <para>The original televisions used an electron gun fired at a phosphor surface to generate
             light and images; this is called a <acronym>CRT</acronym> display (cathode ray tube).
@@ -776,9 +778,9 @@ outputColor = pow(accumLighting, gamma);</programlisting>
                     <mathphrase>1/r<superscript>2.2</superscript></mathphrase>
                 </inlineequation>.</para>
             <para>Since this lighting environment was not designed while looking at gamma correct
-                results, let's look at some scene lighting that was developed that way. Turn on
-                gamma correction and set the gamma value to 2.2 (the default if you did not change
-                it). The press <keycombo>
+                results, let's look at some scene lighting that was developed with proper gamma in
+                mind. Turn on gamma correction and set the gamma value to 2.2 (the default if you
+                did not change it). The press <keycombo>
                     <keycap>Shift</keycap>
                     <keycap>L</keycap>
                 </keycombo>:</para>

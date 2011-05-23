@@ -17,17 +17,12 @@
 
 #define ARRAY_COUNT( array ) (sizeof( array ) / (sizeof( array[0] ) * (sizeof( array ) != sizeof(void*) || sizeof( array[0] ) <= sizeof(void*))))
 
-struct ProgramMeshData
+struct ProgramData
 {
 	GLuint theProgram;
 
 	GLuint modelToCameraMatrixUnif;
 	GLuint normalModelToCameraMatrixUnif;
-};
-
-struct ProgramImposData
-{
-	GLuint theProgram;
 };
 
 struct UnlitProgData
@@ -41,13 +36,16 @@ struct UnlitProgData
 float g_fzNear = 1.0f;
 float g_fzFar = 1000.0f;
 
-ProgramMeshData g_litMeshProg;
-ProgramImposData g_litImpProg;
+ProgramData g_litShaderProg;
+ProgramData g_litTextureProg;
+
 UnlitProgData g_Unlit;
 
 const int g_materialBlockIndex = 0;
 const int g_lightBlockIndex = 1;
 const int g_projectionBlockIndex = 2;
+
+const int g_gaussTexUnit = 0;
 
 UnlitProgData LoadUnlitProgram(const std::string &strVertexShader, const std::string &strFragmentShader)
 {
@@ -67,17 +65,16 @@ UnlitProgData LoadUnlitProgram(const std::string &strVertexShader, const std::st
 	return data;
 }
 
-ProgramMeshData LoadLitMeshProgram(const std::string &strVertexShader, const std::string &strFragmentShader)
+ProgramData LoadLitMeshProgram(const std::string &strVertexShader, const std::string &strFragmentShader)
 {
 	std::vector<GLuint> shaderList;
 
 	shaderList.push_back(Framework::LoadShader(GL_VERTEX_SHADER, strVertexShader));
 	shaderList.push_back(Framework::LoadShader(GL_FRAGMENT_SHADER, strFragmentShader));
 
-	ProgramMeshData data;
+	ProgramData data;
 	data.theProgram = Framework::CreateProgram(shaderList);
 	data.modelToCameraMatrixUnif = glGetUniformLocation(data.theProgram, "modelToCameraMatrix");
-
 	data.normalModelToCameraMatrixUnif = glGetUniformLocation(data.theProgram, "normalModelToCameraMatrix");
 
 	GLuint materialBlock = glGetUniformBlockIndex(data.theProgram, "Material");
@@ -88,45 +85,24 @@ ProgramMeshData LoadLitMeshProgram(const std::string &strVertexShader, const std
 	glUniformBlockBinding(data.theProgram, lightBlock, g_lightBlockIndex);
 	glUniformBlockBinding(data.theProgram, projectionBlock, g_projectionBlockIndex);
 
-	return data;
-}
-
-ProgramImposData LoadLitImposProgram(const std::string &strVertexShader,
-									 const std::string &strGeometryShader,
-									 const std::string &strFragmentShader)
-{
-	std::vector<GLuint> shaderList;
-
-	shaderList.push_back(Framework::LoadShader(GL_VERTEX_SHADER, strVertexShader));
-	shaderList.push_back(Framework::LoadShader(GL_GEOMETRY_SHADER, strGeometryShader));
-	shaderList.push_back(Framework::LoadShader(GL_FRAGMENT_SHADER, strFragmentShader));
-
-	ProgramImposData data;
-	data.theProgram = Framework::CreateProgram(shaderList);
-
-	GLuint materialBlock = glGetUniformBlockIndex(data.theProgram, "Material");
-	GLuint lightBlock = glGetUniformBlockIndex(data.theProgram, "Light");
-	GLuint projectionBlock = glGetUniformBlockIndex(data.theProgram, "Projection");
-
-	glUniformBlockBinding(data.theProgram, materialBlock, g_materialBlockIndex);
-	glUniformBlockBinding(data.theProgram, lightBlock, g_lightBlockIndex);
-	glUniformBlockBinding(data.theProgram, projectionBlock, g_projectionBlockIndex);
+	GLuint gaussianTextureUnif = glGetUniformLocation(data.theProgram, "gaussianTexture");
+	glUseProgram(data.theProgram);
+	glUniform1i(gaussianTextureUnif, g_gaussTexUnit);
+	glUseProgram(0);
 
 	return data;
 }
 
 void InitializePrograms()
 {
-	g_litMeshProg = LoadLitMeshProgram("PN.vert", "Lighting.frag");
-
-	g_litImpProg = LoadLitImposProgram("GeomImpostor.vert", "GeomImpostor.geom",
-		"GeomImpostor.frag");
+	g_litShaderProg = LoadLitMeshProgram("PN.vert", "ShaderGaussian.frag");
+	g_litTextureProg = LoadLitMeshProgram("PN.vert", "TextureGaussian.frag");
 
 	g_Unlit = LoadUnlitProgram("Unlit.vert", "Unlit.frag");
 }
 
 Framework::RadiusDef radiusDef = {10.0f, 3.0f, 70.0f, 3.5f, 1.5f};
-glm::vec3 objectCenter = glm::vec3(0.0f, 30.0f, 25.0f);
+glm::vec3 objectCenter = glm::vec3(0.0f, 0.0f, 0.0f);
 
 Framework::MousePole g_mousePole(objectCenter, radiusDef);
 Framework::ObjectPole g_objectPole(objectCenter, &g_mousePole);
@@ -184,54 +160,75 @@ struct MaterialBlock
 	float padding[3];
 };
 
-Framework::Mesh *g_pPlaneMesh = NULL;
-Framework::Mesh *g_pSphereMesh = NULL;
+Framework::Mesh *g_pObjectMesh = NULL;
 Framework::Mesh *g_pCubeMesh = NULL;
 
 GLuint g_lightUniformBuffer = 0;
 GLuint g_projectionUniformBuffer = 0;
-GLuint g_materialArrayUniformBuffer = 0;
-GLuint g_materialTerrainUniformBuffer = 0;
+GLuint g_materialUniformBuffer = 0;
 
-const int NUMBER_OF_SPHERES = 4;
+const int NUM_GAUSS_TEXTURES = 4;
+GLuint g_gaussTextures[NUM_GAUSS_TEXTURES];
 
-void CreateMaterials()
-{
-	std::vector<MaterialBlock> ubArray(NUMBER_OF_SPHERES);
-
-	ubArray[0].diffuseColor = glm::vec4(0.1f, 0.1f, 0.8f, 1.0f);
-	ubArray[0].specularColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
-	ubArray[0].specularShininess = 0.1f;
-
-	ubArray[1].diffuseColor = glm::vec4(0.4f, 0.4f, 0.4f, 1.0f);
-	ubArray[1].specularColor = glm::vec4(0.1f, 0.1f, 0.1f, 1.0f);
-	ubArray[1].specularShininess = 0.8f;
-
-	ubArray[2].diffuseColor = glm::vec4(0.05f, 0.05f, 0.05f, 1.0f);
-	ubArray[2].specularColor = glm::vec4(0.95f, 0.95f, 0.95f, 1.0f);
-	ubArray[2].specularShininess = 0.3f;
-
-	ubArray[3].diffuseColor = glm::vec4(0.803f, 0.709f, 0.15f, 1.0f);
-	ubArray[3].specularColor = glm::vec4(0.803f, 0.709f, 0.15f, 1.0f) * 0.75;
-	ubArray[3].specularShininess = 0.18f;
-
-	glGenBuffers(1, &g_materialArrayUniformBuffer);
-	glGenBuffers(1, &g_materialTerrainUniformBuffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, g_materialArrayUniformBuffer);
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(MaterialBlock) * ubArray.size(), &ubArray[0], GL_STATIC_DRAW);
-
-	glBindBuffer(GL_UNIFORM_BUFFER, g_materialTerrainUniformBuffer);
-	MaterialBlock mtl;
-	mtl.diffuseColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
-	mtl.specularColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
-	mtl.specularShininess = 0.6f;
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(MaterialBlock), &mtl, GL_STATIC_DRAW);
-
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-}
+GLuint g_gaussSampler = 0;
 
 GLuint g_imposterVAO;
 GLuint g_imposterVBO;
+
+GLuint CreateGaussianTexture(int cosAngleResolution, int shininessResolution)
+{
+	std::vector<unsigned char> textureData(shininessResolution * cosAngleResolution);
+
+	std::vector<unsigned char>::iterator currIt = textureData.begin();
+	for(int iShin = 0; iShin < shininessResolution; iShin++)
+	{
+		float shininess = iShin / (float)(shininessResolution - 1);
+		for(int iCosAng = 0; iCosAng < cosAngleResolution; iCosAng++)
+		{
+			float cosAng = iCosAng / (float)(cosAngleResolution - 1);
+			float angle = acosf(cosAng);
+			float exponent = angle / shininess;
+			exponent = -(exponent * exponent);
+			float gaussianTerm = glm::exp(exponent);
+
+			*currIt = (unsigned char)(gaussianTerm * 255.0f);
+			++currIt;
+		}
+	}
+
+	GLuint gaussTexture;
+	glGenTextures(1, &gaussTexture);
+	glBindTexture(GL_TEXTURE_2D, gaussTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, cosAngleResolution, shininessResolution, 0,
+		GL_RED, GL_UNSIGNED_BYTE, &textureData[0]);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	return gaussTexture;
+}
+
+int CalcCosAngResolution(int level)
+{
+	const int cosAngleStart = 64;
+	return cosAngleStart * ((int)pow(2.0f, level));
+}
+
+void CreateGaussianTextures()
+{
+	for(int loop = 0; loop < NUM_GAUSS_TEXTURES; loop++)
+	{
+		int cosAngleResolution = CalcCosAngResolution(loop);
+		g_gaussTextures[loop] = CreateGaussianTexture(cosAngleResolution, 32);
+	}
+
+	glGenSamplers(1, &g_gaussSampler);
+	glSamplerParameteri(g_gaussSampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glSamplerParameteri(g_gaussSampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glSamplerParameteri(g_gaussSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glSamplerParameteri(g_gaussSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
 
 //Called after the window and OpenGL are initialized. Called exactly once, before the main loop.
 void init()
@@ -240,8 +237,7 @@ void init()
 
 	try
 	{
-		g_pPlaneMesh = new Framework::Mesh("LargePlane.xml");
-		g_pSphereMesh = new Framework::Mesh("UnitSphere.xml");
+		g_pObjectMesh = new Framework::Mesh("Infinity.xml");
 		g_pCubeMesh = new Framework::Mesh("UnitCube.xml");
 	}
 	catch(std::exception &except)
@@ -268,6 +264,15 @@ void init()
 	glEnable(GL_DEPTH_CLAMP);
 
 	//Setup our Uniform Buffers
+	MaterialBlock mtl;
+	mtl.diffuseColor = glm::vec4(1.0f, 0.673f, 0.043f, 1.0f);
+	mtl.specularColor = glm::vec4(1.0f, 0.673f, 0.043f, 1.0f) * 0.4f;
+	mtl.specularShininess = 0.2f;
+
+	glGenBuffers(1, &g_materialUniformBuffer);
+	glBindBuffer(GL_UNIFORM_BUFFER, g_materialUniformBuffer);
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(MaterialBlock), &mtl, GL_STATIC_DRAW);
+
 	glGenBuffers(1, &g_lightUniformBuffer);
 	glBindBuffer(GL_UNIFORM_BUFFER, g_lightUniformBuffer);
 	glBufferData(GL_UNIFORM_BUFFER, sizeof(LightBlock), NULL, GL_DYNAMIC_DRAW);
@@ -283,65 +288,35 @@ void init()
 	glBindBufferRange(GL_UNIFORM_BUFFER, g_projectionBlockIndex, g_projectionUniformBuffer,
 		0, sizeof(ProjectionBlock));
 
+	glBindBufferRange(GL_UNIFORM_BUFFER, g_materialBlockIndex, g_materialUniformBuffer,
+		0, sizeof(MaterialBlock));
+
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-	glGenBuffers(1, &g_imposterVBO);
-	glBindBuffer(GL_ARRAY_BUFFER, g_imposterVBO);
-	glBufferData(GL_ARRAY_BUFFER, NUMBER_OF_SPHERES * 4 * sizeof(float), NULL, GL_STREAM_DRAW);
-
-	glGenVertexArrays(1, &g_imposterVAO);
-	glBindVertexArray(g_imposterVAO);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 16, (void*)(0));
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 16, (void*)(12));
-
-	glBindVertexArray(0);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	glEnable(GL_PROGRAM_POINT_SIZE);
-
-	CreateMaterials();
-}
-
-glm::vec3 GetSphereOrbitPos(Framework::MatrixStack &modelMatrix,
-							const glm::vec3 &orbitCenter, const glm::vec3 &orbitAxis,
-							float orbitRadius, float orbitAlpha)
-{
-	Framework::MatrixStackPusher push(modelMatrix);
-
-	modelMatrix.Translate(orbitCenter);
-	modelMatrix.Rotate(orbitAxis, 360.0f * orbitAlpha);
-
-	glm::vec3 offsetDir = glm::cross(orbitAxis, glm::vec3(0.0f, 1.0f, 0.0f));
-	if(glm::length(offsetDir) < 0.001f)
-		offsetDir = glm::cross(orbitAxis, glm::vec3(1.0f, 0.0f, 0.0f));
-
-	offsetDir = glm::normalize(offsetDir);
-
-	modelMatrix.Translate(offsetDir * orbitRadius);
-
-	return glm::vec3(modelMatrix.Top() * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+	CreateGaussianTextures();
 }
 
 bool g_bDrawCameraPos = false;
 bool g_bDrawLights = true;
+bool g_bUseTexture = false;
+int g_currTexture = 0;
 
-Framework::Timer g_sphereTimer(Framework::Timer::TT_LOOP, 6.0f);
+Framework::Timer g_lightTimer = Framework::Timer(Framework::Timer::TT_LOOP, 6.0f);
 
-float g_lightHeight = 20.0f;
+float g_lightHeight = 1.0f;
+float g_lightRadius = 3.0f;
 
 glm::vec4 CalcLightPosition()
 {
 	const float fLoopDuration = 5.0f;
 	const float fScale = 3.14159f * 2.0f;
 
-	float timeThroughLoop = g_sphereTimer.GetAlpha();
+	float timeThroughLoop = g_lightTimer.GetAlpha();
 
 	glm::vec4 ret(0.0f, g_lightHeight, 0.0f, 1.0f);
 
-	ret.x = cosf(timeThroughLoop * fScale) * 20.0f;
-	ret.z = sinf(timeThroughLoop * fScale) * 20.0f;
+	ret.x = cosf(timeThroughLoop * fScale) * g_lightRadius;
+	ret.z = sinf(timeThroughLoop * fScale) * g_lightRadius;
 
 	return ret;
 }
@@ -349,24 +324,18 @@ glm::vec4 CalcLightPosition()
 const float g_fHalfLightDistance = 25.0f;
 const float g_fLightAttenuation = 1.0f / (g_fHalfLightDistance * g_fHalfLightDistance);
 
-struct VertexData
-{
-	glm::vec3 cameraPosition;
-	float sphereRadius;
-};
-
 //Called to update the display.
 //You should call glutSwapBuffers after all of your rendering to display what you rendered.
 //If you need continuous updates of the screen, call glutPostRedisplay() at the end of the function.
 void display()
 {
-	g_sphereTimer.Update();
+	g_lightTimer.Update();
 
 	glClearColor(0.75f, 0.75f, 1.0f, 1.0f);
 	glClearDepth(1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	if(g_pPlaneMesh && g_pSphereMesh && g_pCubeMesh)
+	if(g_pObjectMesh && g_pCubeMesh)
 	{
 		Framework::MatrixStack modelMatrix;
 		modelMatrix.SetMatrix(g_mousePole.CalcMatrix());
@@ -388,61 +357,34 @@ void display()
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 		{
-			glBindBufferRange(GL_UNIFORM_BUFFER, g_materialBlockIndex, g_materialTerrainUniformBuffer,
+			glBindBufferRange(GL_UNIFORM_BUFFER, g_materialBlockIndex, g_materialUniformBuffer,
 				0, sizeof(MaterialBlock));
+
+			Framework::MatrixStackPusher push(modelMatrix);
+			modelMatrix.ApplyMatrix(g_objectPole.CalcMatrix());
+			modelMatrix.Scale(2.0f); //The unit sphere has a radius 0.5f.
 
 			glm::mat3 normMatrix(modelMatrix.Top());
 			normMatrix = glm::transpose(glm::inverse(normMatrix));
 
-			glUseProgram(g_litMeshProg.theProgram);
-			glUniformMatrix4fv(g_litMeshProg.modelToCameraMatrixUnif, 1, GL_FALSE,
+			ProgramData &prog = g_bUseTexture ? g_litTextureProg : g_litShaderProg;
+
+			glUseProgram(prog.theProgram);
+			glUniformMatrix4fv(prog.modelToCameraMatrixUnif, 1, GL_FALSE,
 				glm::value_ptr(modelMatrix.Top()));
-			glUniformMatrix3fv(g_litMeshProg.normalModelToCameraMatrixUnif, 1, GL_FALSE,
+			glUniformMatrix3fv(prog.normalModelToCameraMatrixUnif, 1, GL_FALSE,
 				glm::value_ptr(normMatrix));
 
-			g_pPlaneMesh->Render();
+			glActiveTexture(GL_TEXTURE0 + g_gaussTexUnit);
+			glBindTexture(GL_TEXTURE_2D, g_gaussTextures[g_currTexture]);
+			glBindSampler(g_gaussTexUnit, g_gaussSampler);
+
+			g_pObjectMesh->Render("lit");
+
+			glBindSampler(g_gaussTexUnit, 0);
+			glBindTexture(GL_TEXTURE_2D, 0);
 
 			glUseProgram(0);
-			glBindBufferBase(GL_UNIFORM_BUFFER, g_materialBlockIndex, 0);
-		}
-
-		{
-			VertexData posSizeArray[NUMBER_OF_SPHERES];
-
-			posSizeArray[0].cameraPosition = glm::vec3(worldToCamMat * glm::vec4(0.0f, 10.0f, 0.0f, 1.0f));
-			posSizeArray[0].sphereRadius = 4.0f;
-
-			posSizeArray[1].cameraPosition = GetSphereOrbitPos(modelMatrix,
-				glm::vec3(0.0f, 10.0f, 0.0f), glm::vec3(0.6f, 0.8f, 0.0f), 20.0f,
-				g_sphereTimer.GetAlpha());
-			posSizeArray[1].sphereRadius = 2.0f;
-
-			posSizeArray[2].cameraPosition = GetSphereOrbitPos(modelMatrix,
-				glm::vec3(-10.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f),
-				10.0f, g_sphereTimer.GetAlpha());
-			posSizeArray[2].sphereRadius = 1.0f;
-
-			posSizeArray[3].cameraPosition = GetSphereOrbitPos(modelMatrix,
-				glm::vec3(10.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f),
-				10.0f, g_sphereTimer.GetAlpha() * 2.0f);
-			posSizeArray[3].sphereRadius = 1.0f;
-
-			glBindBuffer(GL_ARRAY_BUFFER, g_imposterVBO);
-			glBufferData(GL_ARRAY_BUFFER, NUMBER_OF_SPHERES * sizeof(VertexData), posSizeArray,
-				GL_STREAM_DRAW);
-			glBindBuffer(GL_ARRAY_BUFFER, 0);
-		}
-
-		{
-			glBindBufferRange(GL_UNIFORM_BUFFER, g_materialBlockIndex, g_materialArrayUniformBuffer,
-				0, sizeof(MaterialBlock) * NUMBER_OF_SPHERES);
-			
-			glUseProgram(g_litImpProg.theProgram);
-			glBindVertexArray(g_imposterVAO);
-			glDrawArrays(GL_POINTS, 0, NUMBER_OF_SPHERES);
-			glBindVertexArray(0);
-			glUseProgram(0);
-
 			glBindBufferBase(GL_UNIFORM_BUFFER, g_materialBlockIndex, 0);
 		}
 
@@ -451,7 +393,7 @@ void display()
 			Framework::MatrixStackPusher push(modelMatrix);
 
 			modelMatrix.Translate(glm::vec3(CalcLightPosition()));
-			modelMatrix.Scale(0.5f);
+			modelMatrix.Scale(0.25f);
 
 			glUseProgram(g_Unlit.theProgram);
 			glUniformMatrix4fv(g_Unlit.modelToCameraMatrixUnif, 1, GL_FALSE,
@@ -468,6 +410,7 @@ void display()
 
 			modelMatrix.SetIdentity();
 			modelMatrix.Translate(glm::vec3(0.0f, 0.0f, -g_mousePole.GetLookAtDistance()));
+			modelMatrix.Scale(0.25f);
 
 			glDisable(GL_DEPTH_TEST);
 			glDepthMask(GL_FALSE);
@@ -514,21 +457,38 @@ void keyboard(unsigned char key, int x, int y)
 	switch (key)
 	{
 	case 27:
-		delete g_pPlaneMesh;
-		delete g_pSphereMesh;
-		g_pPlaneMesh = NULL;
-		g_pSphereMesh = NULL;
+		delete g_pObjectMesh;
+		delete g_pCubeMesh;
+		g_pObjectMesh = NULL;
+		g_pCubeMesh = NULL;
 		glutLeaveMainLoop();
 		break;
 
-	case 'p': g_sphereTimer.TogglePause(); break;
-	case '-': g_sphereTimer.Rewind(0.5f); break;
-	case '=': g_sphereTimer.Fastforward(0.5f); break;
+	case 'p': g_lightTimer.TogglePause(); break;
+	case '-': g_lightTimer.Rewind(0.5f); break;
+	case '=': g_lightTimer.Fastforward(0.5f); break;
 	case 't': g_bDrawCameraPos = !g_bDrawCameraPos; break;
 	case 'g': g_bDrawLights = !g_bDrawLights; break;
+	case 32:
+		g_bUseTexture = !g_bUseTexture;
+		if(g_bUseTexture)
+			printf("Texture\n");
+		else
+			printf("Shader\n");
+		break;
 	}
 
-	g_mousePole.GLUTKeyOffset(key, 5.0f, 1.0f);
+	if(('1' <= key) && (key <= '9'))
+	{
+		int number = key - '1';
+		if(number < NUM_GAUSS_TEXTURES)
+		{
+			printf("Angle Resolution: %i\n", CalcCosAngResolution(number));
+			g_currTexture = number;
+		}
+	}
+
+//	g_mousePole.GLUTKeyOffset(key, 5.0f, 1.0f);
 }
 
 unsigned int defaults(unsigned int displayMode, int &width, int &height) {return displayMode;}
