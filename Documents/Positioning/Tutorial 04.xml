@@ -315,13 +315,11 @@
                 Z value of -1. The projection will be from vertices in the -Z direction onto this
                 plane; vertices that have a positive Z value are behind the projection plane.</para>
             <para>Now, we will make one more simplifying assumption: the location of the center of
-                the perspective plane is fixed at (0, 0, -1) in camera space. Therefore, since the
-                projection plane is pointing down the -Z axis, eye's location relative to the plane
-                of projection is (0, 0, -1). Thus, the E<subscript>z</subscript> value, the offset
-                from the projection plane to the eye, is always -1. This means that our perspective
-                term, when phrased as division rather than multiplication, is simply
-                    P<subscript>z</subscript>/-1: the negation of the camera-space Z
-                coordinate.</para>
+                the perspective plane is fixed at (0, 0, -1) in camera space. Thus, the
+                    E<subscript>z</subscript> value, the offset from the projection plane to the
+                eye, is always -1. This means that our perspective term, when phrased as division
+                rather than multiplication, is simply P<subscript>z</subscript>/-1: the negation of
+                the camera-space Z coordinate.</para>
             <para>Having a fixed eye position and projection plane makes it difficult to have
                 zoom-in/zoom-out style effects. This would normally be done by moving the plane
                 relative to the fixed eye point. There is a way to do this, however. All you need to
